@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from pyrogram import Client, filters
 from pyrogram.enums import ChatAction
 
-# Load env vars
+# Load .env
 load_dotenv()
 
 API_ID = int(os.getenv("API_ID"))
@@ -13,14 +13,10 @@ API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OWNER_ID = int(os.getenv("OWNER_ID", 0))
+OPENROUTER_MODEL = "mistralai/mistral-7b-instruct"  # Model gratis yang aman
 
-# OpenRouter model default
-OPENROUTER_MODEL = "openrouter/chatgpt"
+user_modes = {}
 
-# Simpan preferensi mode user
-user_modes = {}  # user_id: "sopan" or "ngerocos"
-
-# Logging ke file
 def log_user(user, text):
     try:
         with open("log.txt", "a") as f:
@@ -28,10 +24,8 @@ def log_user(user, text):
     except:
         pass
 
-# Inisialisasi bot Telegram
 bot = Client("ai-bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# 🔁 Perintah ganti mode
 @bot.on_message(filters.command("mode") & filters.private)
 async def set_mode(client, message):
     args = message.text.split()
@@ -47,7 +41,6 @@ async def set_mode(client, message):
     user_modes[message.from_user.id] = mode
     await message.reply(f"✅ Mode kamu sekarang: **{mode}**")
 
-# 🤖 Respon otomatis via OpenRouter
 @bot.on_message(filters.private & filters.text & ~filters.command("mode"))
 async def auto_reply(client, message):
     user = message.from_user
@@ -58,25 +51,23 @@ async def auto_reply(client, message):
     log_user(user, prompt)
     await message.reply_chat_action(ChatAction.TYPING)
 
-    # Jika pemilik bot → pakai mode sopan
+    # Gunakan sistem prompt yang sesuai
     if uid == OWNER_ID:
-        system_prompt = "Kamu adalah asisten AI yang sopan, menghormati pembuatmu, dan tidak boleh kasar kepadanya."
+        system_prompt = "Kamu adalah asisten AI yang sopan dan menghormati pemilik bot ini."
     elif mode == "sopan":
         system_prompt = "Kamu adalah asisten AI yang sopan, membantu, dan ramah."
     else:
         system_prompt = (
-            "Kamu adalah AI blak-blakan, ceplas-ceplos, suka bercanda, dan kadang frontal. "
-            "Jawab dengan jujur dan santai seperti manusia dewasa yang nyablak."
+            "Kamu adalah AI yang blak-blakan, ceplas-ceplos, kadang frontal dan suka bercanda. "
+            "Jawab dengan gaya manusia dewasa yang nyablak dan jujur."
         )
 
     try:
-        # Kirim ke OpenRouter
         response = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://t.me/YourBotUsername",  # opsional
+                "Content-Type": "application/json"
             },
             json={
                 "model": OPENROUTER_MODEL,
@@ -89,12 +80,17 @@ async def auto_reply(client, message):
         )
 
         data = response.json()
+
+        # DEBUG LOGGING
+        if "choices" not in data:
+            await message.reply(f"❌ Gagal menjawab:\nOpenRouter response:\n`{data}`")
+            return
+
         reply = data["choices"][0]["message"]["content"]
         await message.reply(reply)
 
     except Exception as e:
-        await message.reply(f"❌ Gagal menjawab:\n`{str(e)}`")
+        await message.reply(f"❌ Exception:\n`{str(e)}`")
 
-# ▶️ Jalankan bot
 bot.run()
     
