@@ -3,8 +3,9 @@ import openai
 from pyrogram import Client, filters
 from dotenv import load_dotenv
 from datetime import datetime
+from pyrogram.enums import ChatAction
 
-# 🔄 Load variabel dari .env
+# 🔄 Load .env
 load_dotenv()
 
 API_ID = int(os.getenv("API_ID"))
@@ -14,10 +15,10 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 openai.api_key = OPENAI_API_KEY
 
-# 🧠 Simpan mode pengguna
+# 🧠 Mode user
 user_modes = {}  # {user_id: 'sopan' or 'ngerocos'}
 
-# 📝 Logging ke file (opsional)
+# 📝 Log ke file
 def log_user(user, text):
     try:
         with open("log.txt", "a") as f:
@@ -28,7 +29,7 @@ def log_user(user, text):
 # ▶️ Inisialisasi bot
 bot = Client("ai-bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# 🔁 Perintah mode
+# 🔁 Perintah ganti mode
 @bot.on_message(filters.command("mode") & filters.private)
 async def set_mode(client, message):
     args = message.text.split()
@@ -38,30 +39,34 @@ async def set_mode(client, message):
 
     mode = args[1].lower()
     if mode not in ["sopan", "ngerocos"]:
-        await message.reply("Mode tidak dikenali. Gunakan: sopan atau ngerocos.")
+        await message.reply("Mode tidak dikenali. Pilih: sopan atau ngerocos.")
         return
 
     user_modes[message.from_user.id] = mode
-    await message.reply(f"✅ Mode kamu diatur ke: **{mode}**")
+    await message.reply(f"✅ Mode kamu sekarang: **{mode}**")
 
 # 🤖 Auto-reply AI
 @bot.on_message(filters.private & filters.text & ~filters.command("mode"))
 async def auto_reply(client, message):
     user = message.from_user
     prompt = message.text
-    mode = user_modes.get(user.id, "sopan")
+    mode = user_modes.get(user.id, "sopan")  # default sopan
 
     log_user(user, prompt)
-    from pyrogram.enums import ChatAction
-...
-await message.reply_chat_action(ChatAction.TYPING)
-            
+    await message.reply_chat_action(ChatAction.TYPING)
 
-    system_prompt = {
-        "sopan": "Kamu adalah asisten AI yang sopan, membantu, dan ramah.",
-        "ngerocos": "Kamu adalah AI blak-blakan, frontal, ceplas-ceplos, kadang kasar dan bercanda. Jangan terlalu sopan, jawab seperti manusia dewasa yang nyablak dan cuek."
-}[mode]
+    # Pilih prompt berdasarkan mode
+    if mode == "sopan":
+        system_prompt = "Kamu adalah asisten AI yang sopan, membantu, dan ramah."
+    elif mode == "ngerocos":
+        system_prompt = (
+            "Kamu adalah AI blak-blakan, frontal, ceplas-ceplos, kadang kasar dan bercanda. "
+            "Jangan terlalu sopan, jawab seperti manusia dewasa yang nyablak dan cuek."
+        )
+    else:
+        system_prompt = "Kamu adalah asisten AI yang netral dan membantu."
 
+    # Kirim ke OpenAI
     try:
         res = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
@@ -73,7 +78,8 @@ await message.reply_chat_action(ChatAction.TYPING)
         reply = res["choices"][0]["message"]["content"]
         await message.reply(reply)
     except Exception as e:
-        await message.reply(f"❌ Gagal menjawab:\n`{str(e)}`")
+        await message.reply(f"❌ Error dari AI:\n`{str(e)}`")
 
-# ▶️ Jalankan bot
+# ▶️ Jalankan
 bot.run()
+        
