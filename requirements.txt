@@ -1,4 +1,4 @@
 pyrogram
 tgcrypto
-openai>=1.0.0
+requests
 python-dotenv
