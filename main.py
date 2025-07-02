@@ -1,156 +1,126 @@
-import os
-import requests
-from datetime import datetime
-from dotenv import load_dotenv
+import asyncio
+import logging
+import aiohttp
 from pyrogram import Client, filters
-from pyrogram.enums import ChatAction
+from pyrogram.types import Message
 
-# Load .env
-load_dotenv()
+# === KONFIGURASI ===
+BOT_TOKEN = "ISI_BOT_TOKEN_KAMU"
+API_ID = 12345678
+API_HASH = "ISI_API_HASH_KAMU"
+OWNER_ID = 123456789  # Ganti dengan ID Telegram kamu
+GROQ_API_KEY = "ISI_GROQ_API_KEY_KAMU"
+MODEL = "mixtral-8x7b-32768"
 
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OWNER_ID = int(os.getenv("OWNER_ID", 0))
-OPENROUTER_MODEL = "mistralai/mistral-7b-instruct"
+# === VARIABEL GLOBAL ===
+BOT_ON = True
+MODE = "cool"  # default mode
 
-user_modes = {}
-bot_enabled = True  # Global toggle ON/OFF
+# === SETUP LOGGER DAN BOT ===
+logging.basicConfig(level=logging.INFO)
+bot = Client("autoreply_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-def log_user(user, text):
-    try:
-        with open("log.txt", "a") as f:
-            f.write(f"[{datetime.now()}] {user.id} - {user.username}: {text}\n")
-    except:
-        pass
+# === FUNGSI GROQ CHAT ===
+async def get_groq_reply(prompt):
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.9
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, json=data) as resp:
+            res = await resp.json()
+            return res["choices"][0]["message"]["content"]
 
-bot = Client("ai-bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# === FORMAT PROMPT BERDASARKAN MODE ===
+def build_prompt(mode, user_message, is_owner=False):
+    if mode == "sopan":
+        return f"Kamu adalah asisten yang sangat sopan dan ramah. Balas ini dengan hormat:\n\n{user_message}"
+    elif mode == "marah":
+        return f"Balas pesan ini dengan gaya marah dan frontal:\n\n{user_message}"
+    elif mode == "cool":
+        return f"Balas dengan gaya santai dan kalem, sedikit nyentrik:\n\n{user_message}"
+    elif mode == "drytext":
+        return f"Balas pesan ini dengan singkat, kaku, dan datar:\n\n{user_message}"
+    elif mode == "jaim":
+        return f"Balas dengan gaya menjaga image, terkesan baik, rapi, dan profesional:\n\n{user_message}"
+    else:
+        return user_message
 
-# 🔘 ON/OFF CONTROL (OWNER ONLY)
-@bot.on_message(filters.command("bot") & filters.user(OWNER_ID))
-async def toggle_bot(client, message):
-    global bot_enabled
-    args = message.text.split()
-    if len(args) < 2:
-        await message.reply("Ketik `/bot on` atau `/bot off`")
+# === HANYA BALAS KETIKA DI-REPLY ===
+@bot.on_message(filters.reply & filters.private)
+async def handle_reply(client: Client, message: Message):
+    global BOT_ON, MODE
+    if not BOT_ON:
         return
 
-    cmd = args[1].lower()
-    if cmd == "on":
-        bot_enabled = True
-        await message.reply("✅ Bot diaktifkan.")
-    elif cmd == "off":
-        bot_enabled = False
-        await message.reply("🛑 Bot dimatikan sementara.")
-    else:
-        await message.reply("❌ Gunakan `/bot on` atau `/bot off`")
+    # Hanya respon jika balasannya untuk bot
+    if message.reply_to_message.from_user.id != (await client.get_me()).id:
+        return
 
-# 🔁 /mode sopan / ngerocos
-@bot.on_message(filters.command("mode") & filters.private)
+    # Tentukan apakah user adalah owner
+    is_owner = message.from_user.id == OWNER_ID
+
+    # Gunakan mode sopan hanya untuk owner
+    mode = "sopan" if MODE == "sopan" and is_owner else MODE
+
+    prompt = build_prompt(mode, message.text, is_owner)
+    try:
+        await message.chat.action.send_chat_action("typing")
+        reply = await get_groq_reply(prompt)
+        await message.reply_text(reply)
+    except Exception as e:
+        await message.reply_text("❌ Gagal memproses pesan.")
+
+# === HANYA OWNER: TOGGLE ON/OFF ===
+@bot.on_message(filters.command("on") & filters.user(OWNER_ID))
+async def turn_on(client, message):
+    global BOT_ON
+    BOT_ON = True
+    await message.reply("✅ Bot diaktifkan.")
+
+@bot.on_message(filters.command("off") & filters.user(OWNER_ID))
+async def turn_off(client, message):
+    global BOT_ON
+    BOT_ON = False
+    await message.reply("🛑 Bot dinonaktifkan.")
+
+# === HANYA OWNER: GANTI MODE ===
+@bot.on_message(filters.command("mode") & filters.user(OWNER_ID))
 async def set_mode(client, message):
-    args = message.text.split()
-    if len(args) < 2:
-        await message.reply("Contoh: /mode sopan atau /mode ngerocos")
-        return
-    mode = args[1].lower()
-    if mode not in ["sopan", "ngerocos"]:
-        await message.reply("Mode tidak dikenali. Gunakan: sopan atau ngerocos.")
-        return
-    user_modes[message.from_user.id] = mode
-    await message.reply(f"✅ Mode kamu sekarang: **{mode}**")
+    global MODE
+    if len(message.command) < 2:
+        return await message.reply("Gunakan: `/mode [sopan|marah|cool|drytext|jaim]`")
 
-# 🤖 PRIVATE
-@bot.on_message(filters.private & filters.text & ~filters.command(["mode", "bot"]))
-async def auto_reply(client, message):
-    global bot_enabled
-    if not bot_enabled:
-        return
-
-    user = message.from_user
-    uid = user.id
-    prompt = message.text
-    mode = user_modes.get(uid, "sopan")
-
-    log_user(user, prompt)
-    await message.reply_chat_action(ChatAction.TYPING)
-
-    if uid == OWNER_ID:
-        system_prompt = "Kamu adalah AI yang sopan dan menghormati pemilik bot ini. Jawab singkat dan ramah."
-    elif mode == "sopan":
-        system_prompt = "Kamu adalah AI sopan, membantu, dan ramah. Jawablah dengan singkat dan to the point."
+    mode = message.command[1].lower()
+    if mode in ["sopan", "marah", "cool", "drytext", "jaim"]:
+        MODE = mode
+        await message.reply(f"✅ Mode diubah ke: {mode}")
     else:
-        system_prompt = (
-            "Kamu adalah AI blak-blakan, ceplas-ceplos, dan suka marah-marah. "
-            "Jawab nyolot dan tidak sopan, tapi tetap singkat dan jelas."
-        )
+        await message.reply("❌ Mode tidak dikenal.")
 
-    try:
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": OPENROUTER_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ]
-            },
-            timeout=30
-        )
-
-        data = response.json()
-        if "choices" not in data:
-            await message.reply(f"❌ Gagal:\n`{data}`")
-            return
-
-        reply = data["choices"][0]["message"]["content"]
-        await message.reply(reply)
-
-    except Exception as e:
-        await message.reply(f"❌ Error:\n`{str(e)}`")
-
-# 💬 GRUP — Balas semua teks
-@bot.on_message(filters.group & filters.text)
-async def auto_group_reply(client, message):
-    global bot_enabled
-    if not bot_enabled:
-        return
-
-    prompt = message.text
-    await message.reply_chat_action(ChatAction.TYPING)
-
-    try:
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": OPENROUTER_MODEL,
-                "messages": [
-                    {"role": "system", "content": "Kamu adalah AI grup yang singkat, pintar, dan to the point. Jawab setiap pesan yang masuk secara jelas dan ringkas."},
-                    {"role": "user", "content": prompt}
-                ]
-            },
-            timeout=30
-        )
-
-        data = response.json()
-        if "choices" not in data:
-            await message.reply(f"❌ Gagal:\n`{data}`")
-            return
-
-        reply = data["choices"][0]["message"]["content"]
-        await message.reply(reply)
-
-    except Exception as e:
-        await message.reply(f"❌ Error:\n`{str(e)}`")
-
-# ▶️ Jalankan
-bot.run()
+# === HANYA OWNER: BROADCAST ===
+@bot.on_message(filters.command("broadcast") & filters.user(OWNER_ID))
+async def broadcast_handler(client, message):
+    if not message.reply_to_message:
+        return await message.reply("Reply pesan yang ingin dikirim ke semua user.")
     
+    broadcast_text = message.reply_to_message.text
+    count = 0
+    async for dialog in bot.iter_dialogs():
+        try:
+            await bot.send_message(dialog.chat.id, broadcast_text)
+            count += 1
+            await asyncio.sleep(0.3)
+        except:
+            continue
+    await message.reply(f"📣 Broadcast selesai ke {count} pengguna.")
+
+# === JALANKAN BOT ===
+bot.run()
+        
