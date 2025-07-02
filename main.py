@@ -60,7 +60,7 @@ await message.reply_chat_action(ChatAction.TYPING)
     system_prompt = {
         "sopan": "Kamu adalah asisten AI yang sopan, membantu, dan ramah.",
         "ngerocos": "Kamu adalah AI blak-blakan, frontal, ceplas-ceplos, kadang kasar dan bercanda. Jangan terlalu sopan, jawab seperti manusia dewasa yang nyablak dan cuek."
-    }[mode]
+}[mode]
 
     try:
         res = openai.ChatCompletion.create(
