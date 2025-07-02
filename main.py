@@ -52,7 +52,10 @@ async def auto_reply(client, message):
     mode = user_modes.get(user.id, "sopan")
 
     log_user(user, prompt)
-    await message.reply_chat_action("typing")
+    from pyrogram.enums import ChatAction
+...
+await message.reply_chat_action(ChatAction.TYPING)
+            
 
     system_prompt = {
         "sopan": "Kamu adalah asisten AI yang sopan, membantu, dan ramah.",
