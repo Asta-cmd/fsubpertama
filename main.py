@@ -10,17 +10,15 @@ BOT_TOKEN = os.environ["BOT_TOKEN"]
 OWNER_ID = int(os.environ["OWNER_ID"])
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "mixtral-8x7b-32768")
-WEBHOOK = os.environ["WEBHOOK"]
-PORT = int(os.environ.get("PORT", 8080))
 
-# Status dan mode
+# Status & Mode AI
 active = True
 ai_mode = "kalem"
 chats = set()
 
 logging.basicConfig(level=logging.INFO)
 
-# Prompt gaya per mode
+# Prompt sesuai mode
 def generate_prompt(user_msg: str) -> str:
     styles = {
         "kalem": f"Balas pesan ini dengan sopan dan tenang:\n{user_msg}",
@@ -78,7 +76,7 @@ async def reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await msg.reply_text("❌ Bot gagal membalas.")
 
-# Command /mode
+# /mode
 async def set_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ai_mode
     if update.effective_user.id != OWNER_ID:
@@ -93,7 +91,7 @@ async def set_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Gunakan: /mode <kalem|marah|ngeselin|drytext>")
 
-# Command /broadcast
+# /broadcast
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         return
@@ -109,7 +107,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
     await update.message.reply_text(f"✅ Broadcast dikirim ke {count} chat.")
 
-# Command /on dan /off
+# /on & /off
 async def turn_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global active
     if update.effective_user.id == OWNER_ID:
@@ -122,6 +120,7 @@ async def turn_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active = False
         await update.message.reply_text("🛑 Bot dinonaktifkan.")
 
+# Jalankan Bot (Polling)
 def run():
     app = Application.builder().token(BOT_TOKEN).build()
 
@@ -133,7 +132,7 @@ def run():
 
     print("🚀 Bot aktif dalam mode polling.")
     app.run_polling()
-    
+
 if __name__ == "__main__":
     run()
-    
+        
