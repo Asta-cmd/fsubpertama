@@ -5,7 +5,7 @@ from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Konfigurasi
+# Konfigurasi ENV
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 OWNER_ID = int(os.environ["OWNER_ID"])
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
@@ -13,14 +13,14 @@ GROQ_MODEL = os.environ.get("GROQ_MODEL", "mixtral-8x7b-32768")
 WEBHOOK = os.environ["WEBHOOK"]
 PORT = int(os.environ.get("PORT", 8080))
 
-# Status & mode
+# Status dan mode
 active = True
 ai_mode = "kalem"
 chats = set()
 
 logging.basicConfig(level=logging.INFO)
 
-# Gaya mode umum
+# Prompt gaya per mode
 def generate_prompt(user_msg: str) -> str:
     styles = {
         "kalem": f"Balas pesan ini dengan sopan dan tenang:\n{user_msg}",
@@ -55,24 +55,30 @@ async def ask_groq(message: str, sender_id: int) -> str:
         result = response.json()
         return result["choices"][0]["message"]["content"].strip()
 
-# Respon otomatis (hanya jika reply ke bot)
+# Handler pesan (grup & pribadi)
 async def reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global active
-    if not active:
-        return
     msg = update.message
-    if msg and msg.reply_to_message and msg.reply_to_message.from_user.id == context.bot.id:
-        user_input = msg.text
-        sender_id = update.effective_user.id
-        await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
-        try:
-            response = await ask_groq(user_input, sender_id)
-            await msg.reply_text(response)
-            chats.add(msg.chat_id)
-        except Exception as e:
-            await msg.reply_text("❌ Bot gagal membalas.")
+    if not active or not msg or not msg.text:
+        return
 
-# Perintah: /mode
+    sender_id = update.effective_user.id
+    chat_type = msg.chat.type
+
+    # Grup: hanya balas jika reply ke bot
+    if chat_type in ["group", "supergroup"]:
+        if not msg.reply_to_message or msg.reply_to_message.from_user.id != context.bot.id:
+            return
+
+    await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
+    try:
+        response = await ask_groq(msg.text, sender_id)
+        await msg.reply_text(response)
+        chats.add(msg.chat_id)
+    except Exception as e:
+        await msg.reply_text("❌ Bot gagal membalas.")
+
+# Command /mode
 async def set_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ai_mode
     if update.effective_user.id != OWNER_ID:
@@ -87,7 +93,7 @@ async def set_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Gunakan: /mode <kalem|marah|ngeselin|drytext>")
 
-# Perintah: /broadcast
+# Command /broadcast
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         return
@@ -103,7 +109,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
     await update.message.reply_text(f"✅ Broadcast dikirim ke {count} chat.")
 
-# Perintah: /on dan /off
+# Command /on dan /off
 async def turn_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global active
     if update.effective_user.id == OWNER_ID:
@@ -116,7 +122,7 @@ async def turn_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active = False
         await update.message.reply_text("🛑 Bot dinonaktifkan.")
 
-# Main Webhook
+# Webhook Runner
 def run():
     app = Application.builder().token(BOT_TOKEN).build()
 
