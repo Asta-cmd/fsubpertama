@@ -5,7 +5,6 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 from groq import Groq
 
-# Load variabel dari Railway atau file .env lokal
 load_dotenv()
 
 API_ID = int(os.getenv("API_ID"))
@@ -95,4 +94,3 @@ async def ai_reply(_, msg: Message):
 if __name__ == "__main__":
     print("Bot sedang berjalan...")
     bot.run()
-        
