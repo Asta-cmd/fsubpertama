@@ -1,113 +1,137 @@
 import os
 import logging
-from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-)
-import aiohttp
+import httpx
+from telegram import Update, ChatAction
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Load variabel dari .env
-load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = int(os.getenv("OWNER_ID"))
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "mixtral-8x7b-32768")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-PORT = int(os.getenv("PORT", 5000))
+# Konfigurasi
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+OWNER_ID = int(os.environ["OWNER_ID"])
+GROQ_API_KEY = os.environ["GROQ_API_KEY"]
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "mixtral-8x7b-32768")
+WEBHOOK = os.environ["WEBHOOK"]
+PORT = int(os.environ.get("PORT", 8080))
 
-# Global state
-bot_enabled = True
-bot_mode = "sopan"
+# Status & mode
+active = True
+ai_mode = "kalem"
+chats = set()
 
-# Logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
-# Prompt untuk setiap mode
-PROMPT_TEMPLATE = {
-    "sopan": "Balas dengan sopan:\n{msg}",
-    "cool": "Balas dengan santai:\n{msg}",
-    "marah": "Balas dengan nada marah:\n{msg}"
-}
+# Gaya mode umum
+def generate_prompt(user_msg: str) -> str:
+    styles = {
+        "kalem": f"Balas pesan ini dengan sopan dan tenang:\n{user_msg}",
+        "marah": f"Balas dengan kasar, frontal, dan tidak ramah:\n{user_msg}",
+        "ngeselin": f"Balas dengan gaya nyebelin, sarkas, menyindir:\n{user_msg}",
+        "drytext": f"Balas dengan cuek, singkat, tanpa basa-basi:\n{user_msg}",
+    }
+    return styles.get(ai_mode, user_msg)
 
-# Fungsi memanggil API Groq
-async def chat_with_groq(prompt: str) -> str:
-    url = "https://api.groq.com/openai/v1/chat/completions"
+# Request ke Groq
+async def ask_groq(message: str, sender_id: int) -> str:
+    if sender_id == OWNER_ID:
+        prompt = (
+            "Mohon balas dengan tutur kata yang sangat sopan dan penuh hormat, "
+            "seakan-akan Anda sedang berbicara kepada Raja yang mulia:\n"
+            f"{message}"
+        )
+    else:
+        prompt = generate_prompt(message)
+
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json"
     }
     payload = {
-        "model": GROQ_MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.8,
+        "model": GROQ_MODEL
     }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers, json=payload) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                return data["choices"][0]["message"]["content"]
-            else:
-                logger.error(f"❌ Gagal respon AI: {resp.status}")
-                return "❌ AI tidak bisa menjawab saat ini."
 
-# Handler saat pengguna me-reply bot
+    async with httpx.AsyncClient() as client:
+        response = await client.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
+        result = response.json()
+        return result["choices"][0]["message"]["content"].strip()
+
+# Respon otomatis (hanya jika reply ke bot)
 async def reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global bot_enabled, bot_mode
+    global active
+    if not active:
+        return
     msg = update.message
+    if msg and msg.reply_to_message and msg.reply_to_message.from_user.id == context.bot.id:
+        user_input = msg.text
+        sender_id = update.effective_user.id
+        await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
+        try:
+            response = await ask_groq(user_input, sender_id)
+            await msg.reply_text(response)
+            chats.add(msg.chat_id)
+        except Exception as e:
+            await msg.reply_text("❌ Bot gagal membalas.")
 
-    if not msg or not msg.reply_to_message:
-        return
-
-    if not bot_enabled:
-        return
-
-    # Hanya balas jika reply ke pesan bot sendiri
-    if msg.reply_to_message.from_user.id == context.bot.id:
-        prompt = PROMPT_TEMPLATE.get(bot_mode, "Balas:\n{msg}").format(msg=msg.text)
-        await msg.chat.send_action("typing")
-        logger.info(f"🗨️ Prompt dikirim: {prompt}")
-        result = await chat_with_groq(prompt)
-        await msg.reply_text(result)
-
-# Hanya owner yang bisa toggle on/off bot
-async def toggle_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global bot_enabled
+# Perintah: /mode
+async def set_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global ai_mode
     if update.effective_user.id != OWNER_ID:
-        return await update.message.reply_text("❌ Hanya owner yang boleh.")
-    bot_enabled = not bot_enabled
-    status = "aktif ✅" if bot_enabled else "nonaktif ❌"
-    await update.message.reply_text(f"Bot sekarang dalam status: {status}")
-    logger.info(f"⚙️ Toggle oleh owner: {status}")
-
-# Hanya owner yang bisa ubah mode
-async def mode_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global bot_mode
-    if update.effective_user.id != OWNER_ID:
-        return await update.message.reply_text("❌ Hanya owner.")
-    if not context.args:
-        return await update.message.reply_text("Gunakan: /mode [sopan|cool|marah]")
-    mode = context.args[0].lower()
-    if mode in PROMPT_TEMPLATE:
-        bot_mode = mode
-        await update.message.reply_text(f"Mode diubah ke: {bot_mode}")
-        logger.info(f"🔄 Mode diubah ke: {bot_mode}")
+        return
+    if context.args:
+        new_mode = context.args[0].lower()
+        if new_mode in ["kalem", "marah", "ngeselin", "drytext"]:
+            ai_mode = new_mode
+            await update.message.reply_text(f"✅ Mode diubah ke: {ai_mode}")
+        else:
+            await update.message.reply_text("❌ Mode tidak dikenal.")
     else:
-        await update.message.reply_text("Mode tidak dikenal. Gunakan: sopan, cool, marah")
+        await update.message.reply_text("Gunakan: /mode <kalem|marah|ngeselin|drytext>")
 
-# Main app
-if __name__ == "__main__":
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("toggle", toggle_handler))
-    app.add_handler(CommandHandler("mode", mode_handler))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), reply_handler))
+# Perintah: /broadcast
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        return
+    text = " ".join(context.args)
+    if not text:
+        return await update.message.reply_text("❌ Masukkan isi pesan.")
+    count = 0
+    for chat_id in chats:
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=text)
+            count += 1
+        except:
+            pass
+    await update.message.reply_text(f"✅ Broadcast dikirim ke {count} chat.")
 
-    print("🔗 Memulai webhook...")
-    logger.info("🔗 Webhook aktif di port %s", PORT)
+# Perintah: /on dan /off
+async def turn_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global active
+    if update.effective_user.id == OWNER_ID:
+        active = True
+        await update.message.reply_text("✅ Bot diaktifkan.")
+
+async def turn_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global active
+    if update.effective_user.id == OWNER_ID:
+        active = False
+        await update.message.reply_text("🛑 Bot dinonaktifkan.")
+
+# Main Webhook
+def run():
+    app = Application.builder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("mode", set_mode))
+    app.add_handler(CommandHandler("broadcast", broadcast))
+    app.add_handler(CommandHandler("on", turn_on))
+    app.add_handler(CommandHandler("off", turn_off))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply_handler))
+
+    print(f"🔗 Webhook aktif di port {PORT}")
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
-        webhook_url=f"{WEBHOOK_URL}/webhook"
-                )
-        
+        webhook_url=WEBHOOK
+    )
+
+if __name__ == "__main__":
+    run()
+    
