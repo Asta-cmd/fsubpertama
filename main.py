@@ -122,7 +122,6 @@ async def turn_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active = False
         await update.message.reply_text("🛑 Bot dinonaktifkan.")
 
-# Webhook Runner
 def run():
     app = Application.builder().token(BOT_TOKEN).build()
 
@@ -132,13 +131,9 @@ def run():
     app.add_handler(CommandHandler("off", turn_off))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply_handler))
 
-    print(f"🔗 Webhook aktif di port {PORT}")
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        webhook_url=WEBHOOK
-    )
-
+    print("🚀 Bot aktif dalam mode polling.")
+    app.run_polling()
+    
 if __name__ == "__main__":
     run()
     
