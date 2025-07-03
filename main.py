@@ -5,6 +5,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 from groq import Groq
 
+# Load variabel dari Railway atau file .env lokal
 load_dotenv()
 
 API_ID = int(os.getenv("API_ID"))
@@ -32,9 +33,6 @@ SYSTEM_MESSAGES = {
     "senja": "Balas dengan puitis dan dalam, seperti orang yang suka senja dan kopi."
 }
 
-def is_owner(user_id):
-    return user_id == OWNER_ID
-
 @bot.on_message(filters.command("on") & filters.user(OWNER_ID))
 def turn_on(_, msg: Message):
     BOT_STATUS["active"] = True
@@ -49,11 +47,9 @@ def turn_off(_, msg: Message):
 def set_mode(_, msg: Message):
     if len(msg.command) < 2:
         return msg.reply("Contoh: /setmode marah")
-
     mode = msg.command[1]
     if mode not in MODES:
         return msg.reply(f"Mode tidak dikenal. Pilih salah satu: {', '.join(MODES)}")
-    
     BOT_MODE["mode"] = mode
     msg.reply(f"Mode diubah ke: {mode}")
 
@@ -61,11 +57,9 @@ def set_mode(_, msg: Message):
 async def globalcast_handler(_, msg: Message):
     if not msg.reply_to_message:
         return msg.reply("Balas pesan yang ingin dikirim ke semua grup.")
-
     text = msg.reply_to_message.text
     sent = 0
     failed = 0
-
     async for dialog in bot.iter_dialogs():
         if dialog.chat.type in ["group", "supergroup"]:
             try:
@@ -74,7 +68,6 @@ async def globalcast_handler(_, msg: Message):
             except Exception as e:
                 logging.warning(f"Gagal kirim ke {dialog.chat.id}: {e}")
                 failed += 1
-
     await msg.reply(f"✅ Terkirim ke {sent} grup\n❌ Gagal: {failed} grup")
 
 @bot.on_message(filters.text & ~filters.private)
@@ -83,10 +76,8 @@ async def ai_reply(_, msg: Message):
         return
     if not msg.reply_to_message or msg.reply_to_message.from_user.id != (await bot.get_me()).id:
         return
-
     prompt = msg.text
     system_message = SYSTEM_MESSAGES.get(BOT_MODE["mode"], SYSTEM_MESSAGES["kalem"])
-
     try:
         chat_completion = groq_client.chat.completions.create(
             model="mixtral-8x7b-32768",
@@ -104,3 +95,4 @@ async def ai_reply(_, msg: Message):
 if __name__ == "__main__":
     print("Bot sedang berjalan...")
     bot.run()
+        
