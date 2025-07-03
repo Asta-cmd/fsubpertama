@@ -1,6 +1,7 @@
 import os
+import sys
 import logging
-import httpx
+import requests
 from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -18,7 +19,7 @@ chats = set()
 
 logging.basicConfig(level=logging.INFO)
 
-# Prompt sesuai mode
+# Gaya balasan AI
 def generate_prompt(user_msg: str) -> str:
     styles = {
         "kalem": f"Balas pesan ini dengan sopan dan tenang:\n{user_msg}",
@@ -28,8 +29,8 @@ def generate_prompt(user_msg: str) -> str:
     }
     return styles.get(ai_mode, user_msg)
 
-# Request ke Groq
-async def ask_groq(message: str, sender_id: int) -> str:
+# Fungsi ke Groq (sync)
+def ask_groq_sync(message: str, sender_id: int) -> str:
     if sender_id == OWNER_ID:
         prompt = (
             "Mohon balas dengan tutur kata yang sangat sopan dan penuh hormat, "
@@ -48,12 +49,11 @@ async def ask_groq(message: str, sender_id: int) -> str:
         "model": GROQ_MODEL
     }
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
-        result = response.json()
-        return result["choices"][0]["message"]["content"].strip()
+    response = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
+    result = response.json()
+    return result["choices"][0]["message"]["content"].strip()
 
-# Handler pesan (grup & pribadi)
+# Respon pesan (reply ke bot saja)
 async def reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global active
     msg = update.message
@@ -63,20 +63,19 @@ async def reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sender_id = update.effective_user.id
     chat_type = msg.chat.type
 
-    # Grup: hanya balas jika reply ke bot
     if chat_type in ["group", "supergroup"]:
         if not msg.reply_to_message or msg.reply_to_message.from_user.id != context.bot.id:
             return
 
     await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
     try:
-        response = await ask_groq(msg.text, sender_id)
+        response = await context.application.run_in_executor(None, ask_groq_sync, msg.text, sender_id)
         await msg.reply_text(response)
         chats.add(msg.chat_id)
-    except Exception as e:
+    except Exception:
         await msg.reply_text("❌ Bot gagal membalas.")
 
-# /mode
+# /mode command
 async def set_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ai_mode
     if update.effective_user.id != OWNER_ID:
@@ -120,7 +119,13 @@ async def turn_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active = False
         await update.message.reply_text("🛑 Bot dinonaktifkan.")
 
-# Jalankan Bot (Polling)
+# /restart
+async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id == OWNER_ID:
+        await update.message.reply_text("🔄 Restarting bot...")
+        sys.exit(0)
+
+# Run polling
 def run():
     app = Application.builder().token(BOT_TOKEN).build()
 
@@ -128,6 +133,7 @@ def run():
     app.add_handler(CommandHandler("broadcast", broadcast))
     app.add_handler(CommandHandler("on", turn_on))
     app.add_handler(CommandHandler("off", turn_off))
+    app.add_handler(CommandHandler("restart", restart_bot))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply_handler))
 
     print("🚀 Bot aktif dalam mode polling.")
@@ -135,4 +141,4 @@ def run():
 
 if __name__ == "__main__":
     run()
-        
+    
